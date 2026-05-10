@@ -1,0 +1,757 @@
+#!/bin/bash
+
+# hyprland-auto-share-picker's main directory
+AUTO_SHARE_PICKER_FOLDER="$HOME/.config/hyprland-auto-share-picker/"
+
+# If this file exists, it's value will always be used!
+AUTO_SHARE_PICKER_DEFAULT_FILE_NAME="SELECTION-DEFAULT"
+
+# If this file exists, it's value will be used once. (one-time selection). The file is deleted afterwards.
+AUTO_SHARE_PICKER_TEMP_FILE_NAME="SELECTION-TEMP"
+AUTO_SHARE_MANUAL_PICKER_FILE_NAME="MANUAL-PICKER"
+
+# Hyprland XDPH file
+HYPRLAND_XDPH_CONFIG_FILE="$HOME/.config/hypr/xdph.conf"
+
+# Generate full paths.
+AUTO_SHARE_PICKER_DEFAULT_FILE="$AUTO_SHARE_PICKER_FOLDER$AUTO_SHARE_PICKER_DEFAULT_FILE_NAME"
+AUTO_SHARE_PICKER_TEMP_FILE="$AUTO_SHARE_PICKER_FOLDER$AUTO_SHARE_PICKER_TEMP_FILE_NAME"
+AUTO_SHARE_MANUAL_PICKER_FILE="$AUTO_SHARE_PICKER_FOLDER$AUTO_SHARE_MANUAL_PICKER_FILE_NAME"
+
+# Script Path
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+
+# Version
+VERSION="BETA-0.1"
+
+# Styles and Colors
+B=$'\033[1m'  # Bold
+UL=$'\033[4m' # Underline
+ST=$'\033[9m' # Strikethrough
+R=$'\033[0m'  # Reset all
+
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+
+# Messages
+MSG_OK="ok"
+MSG_ERR="err"
+
+# Helper function
+strip_ansi() {
+  local text="$1"
+
+  printf '%s' "$text" | sed -E 's/\\033/\x1b/g' | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g'
+}
+
+visible_length() {
+  local text="$1" # String: Text
+
+  local plain_text=$(strip_ansi "$text")
+  local visible_length=${#plain_text}
+
+  echo "$visible_length"
+}
+
+pad_right() {
+  local text="$1"              # String: Input Text
+  local desired_length="$2"    # Integer: Desired Text length
+  local filler_char="${3:0:1}" # String: Only takes the first char as the filler character
+
+  local current_length=$(visible_length "$text")
+
+  if ((current_length >= desired_length)); then
+    echo "$text"
+    return 0
+  fi
+
+  local result="$text"
+  local padding_length=$(($desired_length - $current_length))
+
+  for ((i = 0; i < padding_length; i++)); do
+    result="$result$filler_char"
+  done
+
+  echo "$result"
+  return 0
+}
+
+msg() {
+  if [ "${HASP_LOG}" != "1" ]; then
+    return 0
+  fi
+
+  local message="$1" # message content
+  local type="$2"    # message type log/ok/info/warn/error/debug (Default: log)
+
+  if [ $# -eq 0 ]; then
+    >&2 echo ""
+    return 0
+  elif [ $# -eq 1 ]; then
+    type="log"
+  fi
+
+  local prefix=""
+  case ${type,,} in
+  ok)
+    prefix="${R}${B}${BLUE}[ OK ]${R} "
+    ;;
+  info)
+    prefix="${R}${B}${BLUE}[INFO]${R} "
+    ;;
+  warn)
+    prefix="${R}${B}${YELLOW}[WARN]${R} "
+    ;;
+  error)
+    prefix="${R}${UL}${B}${RED}[ERROR]${R} "
+    ;;
+  debug)
+    prefix="${R}${CYAN}[DEBUG]${R} "
+    ;;
+  log) ;&
+  *)
+    prefix="${R}[LOG]${R} "
+    ;;
+  esac
+
+  >&2 echo -e "$prefix""$message"
+
+  return 0
+}
+
+# Returns "y" or "n"
+read_yes_no() {
+  local prompt="$1"      # String: Prompt Text
+  local default="${2,,}" # String: y/yes / n/no / none(default)
+
+  local answer=""
+  local default_text=""
+
+  if [ "$#" -eq 0 ]; then
+    msg "Not enough arguments supplied!" "error"
+    echo "$MSG_ERR"
+    return 1
+  elif [ "$#" -eq 1 ]; then
+    default="none"
+  fi
+
+  case "$default" in
+  y | yes)
+    default_text="[Y/n]"
+    default="y"
+    ;;
+  n | no)
+    default_text="[y/N]"
+    default="n"
+    ;;
+  none) ;&
+  *)
+    default_text="[y/n]"
+    default="none"
+    ;;
+  esac
+
+  while [ "$answer" == "" ]; do
+    local temp_answer=""
+    read -p "$prompt $default_text: " temp_answer
+
+    case "$temp_answer" in
+    y | yes)
+      answer="y"
+      ;;
+    n | no)
+      answer="n"
+      ;;
+    "")
+      if ! [[ "$default" == "none" ]]; then
+        answer="$default"
+      else
+        msg "invalid response, try again" "error"
+        >&2 echo "invalid response, try again"
+      fi
+      ;;
+    *)
+      msg "invalid response, try again" "error"
+      >&2 echo "invalid response, try again"
+      ;;
+    esac
+  done
+
+  echo $answer
+
+  return 0
+}
+
+read_string() {
+  local prompt="$1"  # String: Prompt Text
+  local default="$2" # String: Default Text
+
+  local answer=""
+
+  if [ "$#" -eq 0 ]; then
+    msg "Not enough arguments supplied!" "error"
+    echo "$MSG_ERR"
+    return 1
+  fi
+
+  read -p "$prompt [$default]: " answer
+
+  if [[ "$answer" == "" ]]; then
+    answer="$default"
+  fi
+
+  echo "$answer"
+  return 0
+}
+
+read_file() {
+  local file="$1" # path_to_file
+  msg "read_file( \"$file\" )" "debug"
+  if [ "$#" -eq 1 ] && [ -f "$file" ]; then
+    cat "$file"
+  fi
+}
+
+write_file() {
+  local file="$1"    # path_to_file
+  local content="$2" # new content
+  msg "write_file( \"$file\", \"$content\" )" "debug"
+
+  if [ "$#" -eq 2 ]; then
+    # Create file, if doesnt exist.
+    if ! [ -f "$file" ]; then
+      touch "$file"
+    fi
+    echo "$content" >"$file"
+    echo "$MSG_OK"
+    return 0
+  else
+    msg "Not enough arguments supplied!" "error"
+    echo "$MSG_ERR"
+    return 1
+  fi
+}
+
+# Getter/Setter
+get_temp_selection() {
+  read_file "$AUTO_SHARE_PICKER_TEMP_FILE"
+}
+
+set_temp_selection() {
+  write_file "$AUTO_SHARE_PICKER_TEMP_FILE" "$1"
+}
+
+clear_temp_selection() {
+  set_temp_selection ""
+}
+
+pop_temp_selection() {
+  get_temp_selection
+  clear_temp_selection >/dev/null
+}
+
+get_default_selection() {
+  read_file "$AUTO_SHARE_PICKER_DEFAULT_FILE"
+}
+
+set_default_selection() {
+  write_file "$AUTO_SHARE_PICKER_DEFAULT_FILE" "$1"
+}
+
+clear_default_selection() {
+  set_default_selection ""
+}
+
+get_manual_picker() {
+  read_file "$AUTO_SHARE_MANUAL_PICKER_FILE"
+}
+
+set_manual_picker() {
+  write_file "$AUTO_SHARE_MANUAL_PICKER_FILE" "$1"
+}
+
+get_active_monitor() {
+  echo "$(hyprctl activeworkspace -j | jq -r '.monitor')"
+}
+
+get_active_monitor_selection() {
+  echo "[SELECTION]/screen:$(get_active_monitor)"
+}
+
+get_active_monitor_selection_token() {
+  echo "[SELECTION]r/screen:$(get_active_monitor)"
+}
+
+get_active_window() {
+  echo "$(hyprctl activewindow -j | jq -r '.address')"
+}
+
+replace_variables() {
+  local selection_string="$1" # String: Original Selection String
+  selection_string="${selection_string//"%AM%"/"$(get_active_monitor)"}"
+  selection_string="${selection_string//"%ACTIVE-MONITOR%"/"$(get_active_monitor)"}"
+  selection_string="${selection_string//"%AMS%"/"$(get_active_monitor_selection)"}"
+  selection_string="${selection_string//"%ACTIVE-MONITOR-SELECTION%"/"$(get_active_monitor_selection)"}"
+  selection_string="${selection_string//"%AMST%"/"$(get_active_monitor_selection_token)"}"
+  selection_string="${selection_string//"%ACTIVE-MONITOR-SELECTION-TOKEN%"/"$(get_active_monitor_selection_token)"}"
+  echo "$selection_string"
+}
+
+# Core Functions
+picker() {
+  $(get_manual_picker) "$@"
+  return 0
+}
+
+xdph_restart() {
+  sleep 1
+  killall -e xdg-desktop-portal-hyprland
+  killall xdg-desktop-portal
+  nohup /usr/lib/xdg-desktop-portal-hyprland >/dev/null 2>&1 &
+  sleep 2
+  nohup /usr/lib/xdg-desktop-portal >/dev/null 2>&1 &
+}
+
+xdph_config_extended() {
+  cat <<'EOF'
+# https://wiki.hypr.land/Hypr-Ecosystem/xdg-desktop-portal-hyprland/#configuration
+
+screencopy {
+  custom_picker_binary = hyprland-auto-share-picker
+  allow_token_by_default = true
+  max_fps = 0 # (No limit)
+}
+EOF
+}
+
+xdph_config_recommended() {
+  cat <<'EOF'
+# https://wiki.hypr.land/Hypr-Ecosystem/xdg-desktop-portal-hyprland/#configuration
+
+screencopy {
+  custom_picker_binary = hyprland-auto-share-picker
+  allow_token_by_default = true
+}
+EOF
+}
+
+xdph_config_minimal() {
+  cat <<'EOF'
+# https://wiki.hypr.land/Hypr-Ecosystem/xdg-desktop-portal-hyprland/#configuration
+
+screencopy {
+  custom_picker_binary = hyprland-auto-share-picker
+}
+EOF
+}
+
+xdph_apply_config() {
+  local config_identifier="$1" # Index or Name of the config
+  if [ "$#" -eq 0 ]; then
+    msg "not enough arguments supplied" "error"
+    echo "$MSG_ERR"
+  fi
+
+  case ${config_identifier,,} in
+  0 | skip)
+    echo "$MSG_OK"
+    ;;
+  1 | minimal)
+    write_file "$HYPRLAND_XDPH_CONFIG_FILE" "$(xdph_config_minimal)"
+    ;;
+  2 | recommended)
+    write_file "$HYPRLAND_XDPH_CONFIG_FILE" "$(xdph_config_recommended)"
+    ;;
+  3 | extended)
+    write_file "$HYPRLAND_XDPH_CONFIG_FILE" "$(xdph_config_extended)"
+    ;;
+  *)
+    msg "unknown config name" "error"
+    echo "$MSG_ERR"
+    ;;
+  esac
+}
+
+xdph_print_config_helper() {
+  local config_index="$1"   # Integer
+  local config_name="$2"    # String
+  local config_content="$3" # String (Multi-Line)
+
+  local desired_length="90"
+
+  if ! [ "$#" -eq 3 ]; then
+    msg "not enough arguments supplied" "error"
+    echo "$MSG_ERR"
+    return 1
+  fi
+
+  echo -e ""
+  echo -e "$(pad_right "${BLUE}${ST}          ${R}${B}${CYAN} ($config_index) \"$config_name\" Config ${BLUE}${ST}" "$desired_length" " ")${R}"
+  echo -e "$config_content"
+  echo -e "$(pad_right "${BLUE}${ST}${B}" "$desired_length" " ")${R}"
+  echo -e ""
+}
+
+xdph_print_configs() {
+  xdph_print_config_helper "1" "MINIMAL" "$(xdph_config_minimal)"
+  xdph_print_config_helper "2" "RECOMMENDED" "$(xdph_config_recommended)"
+  xdph_print_config_helper "3" "EXTENDED" "$(xdph_config_extended)"
+}
+
+xdph_config_helper() {
+  local selected_config=""
+  local selected_config_name=""
+  local error_message=""
+
+  while [[ "$selected_config" == "" ]]; do
+    clear
+    xdph_print_configs
+
+    echo ""
+    echo "$error_message"
+    error_message=""
+    echo ""
+
+    local temp_selected_config=$(read_string "Which config do you want to install? (Numbers and strings possible)" "RECOMMENDED")
+
+    case ${temp_selected_config,,} in
+    1 | minimal)
+      selected_config="1"
+      selected_config_name="Minimal"
+      break
+      ;;
+    2 | recommended)
+      selected_config="2"
+      selected_config_name="Recommended"
+      break
+      ;;
+    3 | extended)
+      selected_config="3"
+      selected_config_name="Extended"
+      break
+      ;;
+    *)
+      error_message="[ERROR] Invalid selection. Use numbers or the name of the config (Example: \"2\" or \"RECOMMENDED\")"
+      ;;
+    esac
+  done
+
+  xdph_apply_config $selected_config
+
+  sleep 2.0
+
+  clear
+  local xdph_restart_now=$(read_yes_no "Do you want to restart XDPH now? (You can alternatively restart your system)" "y")
+  if [[ "$xdph_restart_now" == "y" ]]; then
+    xdph_restart
+    echo "Done"
+  else
+    echo "Skipping.."
+  fi
+}
+
+setup() {
+  # Setup function for creating the config folder and files.
+  local force="$1" # If equals "force", replaces configs with defaults.
+  msg "setup( \"$force\" )" "debug"
+
+  # Check if the main config folder doesnt exist or --setup is passed.
+  if ! [ -d "$AUTO_SHARE_PICKER_FOLDER" ] || [[ "$force" == "force" ]]; then
+    # Create main folder
+    mkdir -p "$AUTO_SHARE_PICKER_FOLDER"
+
+    # Create empty SELECTION-TEMP file
+    clear_temp_selection
+
+    # Create empty SELECTION-DEFAULT file
+    clear_default_selection
+
+    # Create MANUAL-PICKER default file.
+    set_manual_picker "hyprland-share-picker"
+  fi
+}
+
+quick_install() {
+  local dest="/usr/bin/hyprland-auto-share-picker"
+
+  if [[ -f "$dest" ]]; then
+    local force_answer=$(read_yes_no "Already installed. Overwrite?", "n")
+    [[ "$force_answer" == "n" ]] && return 1
+  fi
+
+  sudo cp "$SCRIPT_PATH" "$dest"
+  sudo chmod +x "$dest"
+  msg "Installed to $dest" "ok"
+  echo "$MSG_OK"
+}
+
+run_wizard() {
+  clear
+  local install=$(read_yes_no "Do you want to install the script to \"/usr/bin/hyprland-auto-share-picker\"? (requires sudo)" "y")
+  if [[ "$install" == "y" ]]; then
+    echo "Installing.."
+    quick_install
+    echo "Done"
+  else
+    echo "Skipping installation.."
+  fi
+  sleep 2.0
+
+  clear
+  xdph_print_configs
+  echo ""
+  echo ""
+  echo ""
+  local xdph_apply=$(read_yes_no "Do you want to apply one of the configs above? (Has to be done manually otherwise) " "y")
+  if [[ "$xdph_apply" == "y" ]]; then
+    xdph_config_helper
+  else
+    echo "Skipping .."
+  fi
+  sleep 2.0
+
+  local picker_worked=""
+  while true; do
+    clear
+    local picker_selected=$(read_string "Which Manual Picker do you prefer to use?" "hyprland-share-picker")
+    echo "Testing Picker.."
+    sleep 1.0
+    local picker_test_ouput="$("$picker_selected")"
+    echo "SELECTION-STRING: $picker_test_ouput"
+    echo ""
+
+    if [[ "$picker_test_ouput" == "[SELECTION]"* ]]; then
+      echo "The picker returned a valid SELECTION-STRING. Setting as default Picker.."
+      set_manual_picker "$picker_selected"
+      picker_worked="true"
+      sleep 3.0 # Give the user some more time to read.
+      break
+    else
+      echo "The selected Picker didn't return a valid SELECTION-STRING"
+      local picker_try_again=$(read_yes_no "Do you want to try again?" "y")
+      if [[ "$picker_try_again" == "n" ]]; then
+        local picker_force_set=$(read_yes_no "Do you still want to set \"$picker_selected\" as your default picker?" "n")
+        if [[ "$picker_force_set" == "y" ]]; then
+          set_manual_picker "$select_picker"
+        else
+          echo "Skipping.."
+        fi
+        break
+      fi
+    fi
+  done
+
+  if [[ "$picker_worked" == "true" ]]; then
+    clear
+    sleep 2.0
+
+    local default_pick_now=$(read_yes_no "Do you want to set a default SELECTION-STRING using your picker right now?" "y")
+    if [[ "$default_pick_now" == "y" ]]; then
+      set_default_selection "$(picker)"
+    else
+      echo "Skipping.."
+    fi
+  fi
+  sleep 2.0
+
+  clear
+  echo "Wizard finished!"
+  read -p "Press Enter to continue..."
+  exit 0
+}
+
+setup
+
+# Option Handling
+case ${1,,} in
+-h | --help)
+  echo -e "${B}hyprland-auto-share-picker${R} is a simple tool, that lets you automate your Source Selection for Recording and Screen Sharing, with a big focus on scriptability."
+  echo -e ""
+  echo -e "${UL}${B}Usage:${R} ${B}hyprland-auto-share-picker${R} [OPTIONS]/<SELECTION-STRING>"
+  echo -e ""
+  echo -e "${UL}${B}Configs in $AUTO_SHARE_PICKER_FOLDER:${R}"
+  echo -e "Each Config File only contains a single value. Configs get checked in the same order as shown below."
+  echo -e ""
+  echo -e "${B} $AUTO_SHARE_PICKER_TEMP_FILE_NAME                              ${R}1. Returns the specified value as the SELECTION-STRING to XDPH and empties the file${R}"
+  echo -e "${B} $AUTO_SHARE_PICKER_DEFAULT_FILE_NAME                           ${R}2. Returns the specified value as the SELECTION-STRING to XDPH${R}"
+  echo -e "${B} $AUTO_SHARE_MANUAL_PICKER_FILE_NAME                               ${R}3. Launches the specified MANUAL-PICKER to obtain the SELECTION-STRING${R}"
+  echo -e ""
+  echo -e "${UL}${B}Options:${R}"
+  echo -e "${B} -h, --help                                  ${R}Prints this help page${R}"
+  echo -e "${B} -w, --wizard                                ${R}Installation Helper Wizard${R}"
+  echo -e "${B} -i, --install                               ${R}Install to \"/usr/bin/hyprland-auto-share-picker\" (Requires sudo)${R}"
+  echo -e "${B} -s, --selection <SELECTION-STRING>          ${R}Alias for '--set-temp'${R}"
+  echo -e "${B} -p, --picker                                ${R}Launches the MANUAL-PICKER defined in file \"$AUTO_SHARE_MANUAL_PICKER_FILE_NAME\"${R}"
+  echo -e "${B} -a, --allow-token                           ${R}Passes the argument through to the MANUAL-PICKER, if it is invoked${R}"
+  echo -e "${B} -xt, --pop-temp                             ${R}Prints and clears the specified SELECTION-STRING from file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e "${B} -gt, --get-temp                             ${R}Prints the specified SELECTION-STRING from file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e "${B} -st, --set-temp <SELECTION-STRING>          ${R}Writes the specified SELECTION-STRING to file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e "${B} -pt, --pick-temp                            ${R}Runs the MANUAL-PICKER and writes the SELECTION-STRING to file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e "${B} -ct, --clear-temp                           ${R}Clears the SELECTION-STRING from file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e "${B} -gd, --get-default                          ${R}Prints the specified SELECTION-STRING from file \"$AUTO_SHARE_PICKER_DEFAULT_FILE_NAME\"${R}"
+  echo -e "${B} -sd, --set-default <SELECTION-STRING>       ${R}Writes the specified SELECTION-STRING to file \"$AUTO_SHARE_PICKER_DEFAULT_FILE_NAME\"${R}"
+  echo -e "${B} -pd, --pick-default                         ${R}Runs the MANUAL-PICKER and writes the SELECTION-STRING to file \"$AUTO_SHARE_PICKER_DEFAULT_FILE_NAME\"${R}"
+  echo -e "${B} -cd, --clear-default                        ${R}Clears the SELECTION-STRING from file \"$AUTO_SHARE_PICKER_DEFAULT_FILE_NAME\"${R}"
+  echo -e "${B} -gp, --get-picker                           ${R}Prints the specified MANUAL-PICKER from file \"$AUTO_SHARE_MANUAL_PICKER_FILE_NAME\"${R}"
+  echo -e "${B} -sp, --set-picker <COMMAND>                 ${R}Writes the specified MANUAL-PICKER to file \"$AUTO_SHARE_MANUAL_PICKER_FILE_NAME\"${R}"
+  echo -e "${B} -pam, --active-monitor                      ${R}Prints the Port of the currently active monitor${R}"
+  echo -e "${B} -pams, --active-monitor-selection           ${R}Prints the SELECTION-STRING for the currently active monitor${R}"
+  echo -e "${B} -pamst, --active-monitor-selection-token    ${R}Prints the SELECTION-STRING for the currently active monitor with tokens allowed${R}"
+  echo -e ""
+  echo -e "${B} \"[SELECTION]*\"                              ${R}Writes the Selection String to the file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e ""
+  echo -e "${UL}${B}Advanced Options:${R}"
+  echo -e "${B} -v, --version                               ${R}Prints the current Version${R}"
+  echo -e "${B} --defaults                                  ${R}Sets the default values again in file \"$AUTO_SHARE_PICKER_FOLDER\"${R}"
+  echo -e "${B} --reset                                     ${R}Deletes and recreates the config folder in file \"$AUTO_SHARE_PICKER_FOLDER\"${R}"
+  echo -e "${B} --xdph-config-helper                        ${R}A helper for selecting one of the shipped configs"
+  echo -e "${B} --xdph-print-configs                        ${R}Prints all shipped configs [MINIMAL/RECOMMENDED/EXTENDED]"
+  echo -e "${B} --xdph-apply-config <CONFIG_NAME>           ${R}Applies the selected config to \"$HYPRLAND_XDPH_CONFIG_FILE\"${R}"
+  echo -e ""
+  echo -e "${UL}${B}SELECTION-STRING Variables:${R}"
+  echo -e "${B}hyprland-auto-share-picker${R} supports Variables in the SELECTION-STRING, these get replaced with their corresponding value${R}"
+  echo -e "This happens at runtime, so you can place variables in configs. For scripting, use \"\$(hyprland-auto-share-picker --print-active-monitor-selection-token)\"${R}"
+  echo -e ""
+  echo -e "${B} %AM%   / %ACTIVE-MONITOR%                   ${R}Gets replaced with the SELECTION-STRING of the currently active monitor${R}"
+  echo -e "${B} %AMS%  / %ACTIVE-MONITOR-SELECTION%         ${R}Gets replaced with the SELECTION-STRING of the currently active monitor${R}"
+  echo -e "${B} %AMST% / %ACTIVE-MONITOR-SELECTION-TOKEN%   ${R}Gets replaced with the SELECTION-STRING of the currently active monitor${R}"
+  echo -e ""
+  echo -e "${UL}${B}Env:${R}"
+  echo -e "${B} HASP_LOG=1                                  ${R}Enables logging"
+  echo -e ""
+  echo -e "${UL}${B}Examples:${R}"
+  echo -e " hyprland-auto-share-picker \"[SELECTION]r%ACTIVE-MONITOR-SELECTION%\"               # Writes the Selection String of the active window to $AUTO_SHARE_PICKER_FILE_NAME${R}"
+  echo -e " hyprland-auto-share-picker -s \"[SELECTION]r%ACTIVE-MONITOR-SELECTION-TOKEN%\"      # Writes the Selection String of the active monitor to $AUTO_SHARE_PICKER_FILE_NAME${R}"
+  echo -e " hyprland-auto-share-picker --pick-default                                           # Use the MANUAL-PICKER to set the default SELECTION-STRING in $AUTO_SHARE_PICKER_DEFAULT_FILE_NAME${R}"
+  echo -e ""
+  echo -e " # Launches OBS and streams DP-1 to the virtualcam (uses the default scene in OBS)"
+  echo -e " hyprland-auto-share-picker \"[SELECTION]r/screen:DP-1\"; \\"
+  echo -e " pkill obs && while pgrep obs >/dev/null;do sleep 0.1; done; sleep 1; \\"
+  echo -e " obs --startvirtualcam --minimize-to-tray --disable-missing-files-check"
+
+  exit 0
+  ;;
+-w | --wizard)
+  run_wizard
+  exit 0
+  ;;
+-i | --install)
+  quick_install
+  exit 0
+  ;;
+-p | --picker)
+  picker
+  exit 0
+  ;;
+-xt | --pop-temp)
+  pop_temp_selection
+  exit 0
+  ;;
+-gt | --get-temp)
+  get_temp_selection
+  exit 0
+  ;;
+-s | --selection) ;&
+-st | --set-temp)
+  set_temp_selection "$2"
+  exit 0
+  ;;
+-pt | --pick-temp)
+  set_temp_selection "$(picker)"
+  exit 0
+  ;;
+-ct | --clear-temp)
+  clear_temp_selection
+  exit 0
+  ;;
+-gd | --get-default)
+  get_default_selection
+  exit 0
+  ;;
+-sd | --set-default)
+  set_default_selection "$2"
+  exit 0
+  ;;
+-pd | --pick-default)
+  set_default_selection "$(picker)"
+  exit 0
+  ;;
+-cd | --clear-default)
+  clear_default_selection
+  exit 0
+  ;;
+-gp | --get-picker)
+  get_manual_picker
+  exit 0
+  ;;
+-sp | --set-picker)
+  set_manual_picker "$2"
+  exit 0
+  ;;
+-pam | --print-active-monitor)
+  get_active_monitor
+  exit 0
+  ;;
+-pams | --print-active-monitor-selection)
+  get_active_monitor_selection
+  exit 0
+  ;;
+-pamst | --print-active-monitor-selection-token)
+  get_active_monitor_selection_token
+  exit 0
+  ;;
+-v | --version)
+  echo "$VERSION"
+  exit 0
+  ;;
+--defaults)
+  setup "force"
+  exit 0
+  ;;
+--reset)
+  rm -rf "$AUTO_SHARE_PICKER_FOLDER"
+  setup
+  exit 0
+  ;;
+--xdph-config-helper)
+  xdph_config_helper
+  exit 0
+  ;;
+--xdph-print-configs)
+  xdph_print_configs
+  exit 0
+  ;;
+--xdph-apply-config)
+  xdph_apply_config "$2"
+  exit 0
+  ;;
+* | --allow-token)
+  # Do nothing and let "$@" handle it.
+  ;;
+esac
+
+# Parse SELECTION-STRING
+selection_string_parsed_temp=$(replace_variables "$1")
+if [[ "$1" == "[SELECTION]"* ]] || [[ "$selection_string_parsed_temp" == "[SELECTION]"* ]]; then
+  set_temp_selection "$1"
+  exit 0
+fi
+
+# Temp File
+if [[ "$(get_temp_selection)" != "" ]]; then
+  echo "$(replace_variables $(pop_temp_selection))"
+  exit 0
+fi
+
+# Default File
+if [[ "$(get_default_selection)" != "" ]]; then
+  echo "$(replace_variables $(get_default_selection))"
+  exit 0
+fi
+
+picker "$@"
+
+exit 0
