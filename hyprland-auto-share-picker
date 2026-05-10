@@ -601,7 +601,7 @@ case ${1,,} in
   echo -e "${B} -pams, --active-monitor-selection           ${R}Prints the SELECTION-STRING for the currently active monitor${R}"
   echo -e "${B} -pamst, --active-monitor-selection-token    ${R}Prints the SELECTION-STRING for the currently active monitor with tokens allowed${R}"
   echo -e ""
-  echo -e "${B} \"[SELECTION]*\"                              ${R}Writes the Selection String to the file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
+  echo -e "${B} \"[SELECTION]*\" / \"%VARIABLE%\"               ${R}Writes the Selection String to the file \"$AUTO_SHARE_PICKER_TEMP_FILE_NAME\"${R}"
   echo -e ""
   echo -e "${UL}${B}Advanced Options:${R}"
   echo -e "${B} -v, --version                               ${R}Prints the current Version${R}"
@@ -610,6 +610,7 @@ case ${1,,} in
   echo -e "${B} --xdph-config-helper                        ${R}A helper for selecting one of the shipped configs"
   echo -e "${B} --xdph-print-configs                        ${R}Prints all shipped configs [MINIMAL/RECOMMENDED/EXTENDED]"
   echo -e "${B} --xdph-apply-config <CONFIG_NAME>           ${R}Applies the selected config to \"$HYPRLAND_XDPH_CONFIG_FILE\"${R}"
+  echo -e "${B} --xdph-restart                              ${R}Restarts XDPH"
   echo -e ""
   echo -e "${UL}${B}SELECTION-STRING Variables:${R}"
   echo -e "${B}hyprland-auto-share-picker${R} supports Variables in the SELECTION-STRING, these get replaced with their corresponding value${R}"
@@ -726,6 +727,10 @@ case ${1,,} in
   ;;
 --xdph-apply-config)
   xdph_apply_config "$2"
+  exit 0
+  ;;
+--xdph-restart)
+  xdph_restart
   exit 0
   ;;
 * | --allow-token)
