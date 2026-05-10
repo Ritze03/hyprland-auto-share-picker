@@ -29,19 +29,19 @@ hyprland-auto-share-picker --pick-default # This opens the default manual picker
 ## Installation (Using the Wizard)
 *This is the way to go, if you want to get it up and running in ~2 Minutes.*
 
-1. Clone the repo:
+#### 1. Clone the repo:
 ```bash
 git clone https://github.com/Ritze03/hyprland-auto-share-picker.git
 cd hyprland-auto-share-picker
 ```
 
-2. Run the Installation Wizard:
+#### 2. Run the Installation Wizard:
 *The default values should work for most people. If you have no clue, keep the defaults!*
 ```bash
 ./hyprland-auto-share-picker --wizard
 ```
 
-3. Additional Information: Pick the default Selection:
+#### 3. Additional Information: Pick the default Selection:
 *This is already done during the wizard, but if you want to change the default later, use the following command:*
 ```bash
 hyprland-auto-share-picker --pick-default
@@ -50,18 +50,18 @@ hyprland-auto-share-picker --pick-default
 ## Installation (Using Commands)
 *Installing it manually will give you a good baseline to write simple Scripts.*
 
-1. Clone the repo:
+#### 1. Clone the repo:
 ```bash
 git clone https://github.com/Ritze03/hyprland-auto-share-picker.git
 cd hyprland-auto-share-picker
 ```
 
-2. Install to `/usr/bin/`:
+#### 2. Install to `/usr/bin/`:
 ```bash
 ./hyprland-auto-share-picker --install
 ```
 
-3. Modify the XDPH config:
+#### 3. Modify the XDPH config:
 
 **Using the integrated Helper**
 ```bash
@@ -74,17 +74,17 @@ hyprland-auto-share-picker --xdph-print-configs
 hyprland-auto-share-picker --xdph-apply-config <CONFIG_NAME/CONFIG_INDEX>
 ```
 
-4. Optional: Configure a custom picker (Uses the one shipped with Hyprland by default)
+#### 4. Optional: Configure a custom picker (Uses the one shipped with Hyprland by default)
 ```bash
 hyprland-auto-share-picker --set-picker <COMMAND>
 ```
 
-5. Set a default Selection
+#### 5. Set a default Selection
 ```bash
 hyprland-auto-share-picker --pick-default
 ```
 
-6. Scripting: Set a temporary Selection
+#### 6. Scripting: Set a temporary Selection
 *Temporary Selections are only used once, making it perfect, to run before an application like OBS*
 ```bash
 hyprland-auto-share-picker --picker # To get the SELECTION-STRING
