@@ -285,18 +285,77 @@ get_active_monitor_selection_token() {
   echo "[SELECTION]r/screen:$(get_active_monitor)"
 }
 
-get_active_window() {
+get_active_window_address() {
   echo "$(hyprctl activewindow -j | jq -r '.address')"
+}
+
+get_active_window_address_decimal() {
+  local hex
+  hex="$(get_active_window_address)"
+
+  # remove 0x
+  hex="${hex#0x}"
+
+  echo "$((16#$hex))"
+}
+
+get_active_window() {
+  local active_addr
+  active_addr="$(get_active_window_address_decimal)"
+
+  local raw="$XDPH_WINDOW_SHARING_LIST"
+
+  while [[ -n "$raw" ]]; do
+    local id class title addr
+
+    id="${raw%%\[HC>\]*}"
+    raw="${raw#*\[HC>\]}"
+
+    class="${raw%%\[HT>\]*}"
+    raw="${raw#*\[HT>\]}"
+
+    title="${raw%%\[HE>\]*}"
+    raw="${raw#*\[HE>\]}"
+
+    addr="${raw%%\[HA>\]*}"
+    raw="${raw#*\[HA>\]}"
+
+    if [[ "$addr" == "$active_addr" ]]; then
+      echo "$id"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+get_active_window_selection() {
+  echo "[SELECTION]/window:$(get_active_window)"
+}
+
+get_active_window_selection_token() {
+  echo "[SELECTION]r/window:$(get_active_window)"
 }
 
 replace_variables() {
   local selection_string="$1" # String: Original Selection String
+  # Active Monitor
   selection_string="${selection_string//"%AM%"/"$(get_active_monitor)"}"
   selection_string="${selection_string//"%ACTIVE-MONITOR%"/"$(get_active_monitor)"}"
   selection_string="${selection_string//"%AMS%"/"$(get_active_monitor_selection)"}"
   selection_string="${selection_string//"%ACTIVE-MONITOR-SELECTION%"/"$(get_active_monitor_selection)"}"
   selection_string="${selection_string//"%AMST%"/"$(get_active_monitor_selection_token)"}"
   selection_string="${selection_string//"%ACTIVE-MONITOR-SELECTION-TOKEN%"/"$(get_active_monitor_selection_token)"}"
+
+  # Active Window
+  if ! [ -v XDPH_WINDOW_SHARING_LIST ]; then
+    selection_string="${selection_string//"%AW%"/"$(get_active_window)"}"
+    selection_string="${selection_string//"%ACTIVE-WINDOW%"/"$(get_active_window)"}"
+    selection_string="${selection_string//"%AWS%"/"$(get_active_window_selection)"}"
+    selection_string="${selection_string//"%ACTIVE-WINDOW-SELECTION%"/"$(get_active_window_selection)"}"
+    selection_string="${selection_string//"%AWST%"/"$(get_active_window_selection_token)"}"
+    selection_string="${selection_string//"%ACTIVE-WINDOW-SELECTION-TOKEN%"/"$(get_active_window_selection_token)"}"
+  fi
   echo "$selection_string"
 }
 
@@ -616,9 +675,13 @@ case ${1,,} in
   echo -e "${B}hyprland-auto-share-picker${R} supports Variables in the SELECTION-STRING, these get replaced with their corresponding value${R}"
   echo -e "This happens at runtime, so you can place variables in configs. For scripting, use \"\$(hyprland-auto-share-picker --print-active-monitor-selection-token)\"${R}"
   echo -e ""
-  echo -e "${B} %AM%   / %ACTIVE-MONITOR%                   ${R}Gets replaced with the SELECTION-STRING of the currently active monitor${R}"
+  echo -e "${B} %AM%   / %ACTIVE-MONITOR%                   ${R}Gets replaced with the Name of the currently active monitor${R}"
   echo -e "${B} %AMS%  / %ACTIVE-MONITOR-SELECTION%         ${R}Gets replaced with the SELECTION-STRING of the currently active monitor${R}"
   echo -e "${B} %AMST% / %ACTIVE-MONITOR-SELECTION-TOKEN%   ${R}Gets replaced with the SELECTION-STRING of the currently active monitor${R}"
+  echo -e ""
+  echo -e "${B} %AW%   / %ACTIVE-WINDOW%                   ${R}Gets replaced with the Id of the currently active active${R}"
+  echo -e "${B} %AWS%  / %ACTIVE-WINDOW-SELECTION%         ${R}Gets replaced with the SELECTION-STRING of the currently active active${R}"
+  echo -e "${B} %AWST% / %ACTIVE-WINDOW-SELECTION-TOKEN%   ${R}Gets replaced with the SELECTION-STRING of the currently active active${R}"
   echo -e ""
   echo -e "${UL}${B}Env:${R}"
   echo -e "${B} HASP_LOG=1                                  ${R}Enables logging"
